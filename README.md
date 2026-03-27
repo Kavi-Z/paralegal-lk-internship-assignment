@@ -83,12 +83,11 @@ ensure that only valid human names are included in the final JSON output.
 
 **Installation:**
 - Clone the repository:
+  
 - git clone https://github.com/your-username/judge-extraction.git
 - cd judge-extraction
-
-uv install
-
-uv run src/extract_judges.py
+- uv install
+- uv run src/extract_judges.py
 
 **Dependencies:**
 Python 3.10+
