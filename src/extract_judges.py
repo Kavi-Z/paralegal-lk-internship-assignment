@@ -36,23 +36,29 @@ def clean_judge_name(name_str):
     if re.search(r"(?i)\s+v\.?\s+", name_str): 
         return None
         
-    # 2. Strip explicit full-word and abbreviated titles
-    clean = re.sub(r"(?i)\b(chief justice|justice|judge of the supreme court|judge of the court of appeal|judge)\b", "", name_str)
-    clean = re.sub(r"(?i)\b(cj|j|pc|p\.c\.|c\.j\.|j\.|dr\.|dr|mr\.|mrs\.|ms\.)\b", "", clean)
+    # 2. STRIP SIGNATURE MARKS AND AGREEMENTS 
+    clean = re.sub(r"(?i)\b(i agree|agree|agreed|sgd\.?|signed|true copy|signature)\b", "", name_str)
+        
+    # 3. Strip explicit full-word and abbreviated titles
+    clean = re.sub(r"(?i)\b(chief justice|justice|judge of the supreme court|judge of the court of appeal|judge)\b", "", clean)
+    clean = re.sub(r"(?i)\b(cj|pc|p\.c\.|c\.j\.|dr\.|dr|mr\.|mrs\.|ms\.)\b", "", clean)
     
-    # 3. Remove weird punctuation and collapse spaces
+    # Strip "J." or "J" ONLY if it's a title (at the end or after a comma) 
+    clean = re.sub(r"(?i)(,\s*J\.?|\bJ\.?\s*$)", "", clean)
+    
+    # 4. Remove weird punctuation and collapse spaces
     clean = re.sub(r"[^a-zA-Z\s\.]", "", clean).strip()
     clean = re.sub(r"\s+", " ", clean).strip(" .")
     
-    # 4. GRAMMAR NUKE: Reject any string containing common sentence words or legal jargon
+    # 5. GRAMMAR NUKE: Reject any string containing common sentence words or legal jargon
     grammar_nuke = r"(?i)\b(the|in|of|to|for|with|by|from|on|at|as|encountered|others|such|made|accordance|procedure|established|law|obstructions|omission|single|material|fact|leads|incomplete|cause|action|statement|claim|becomes|bad|function|party|picture|information|detail|opposite|understand|case|meet|arguments|apposite|allude|constitutional|proceedings|must|discontinued|relation|former|prime|minister|who|has|since|become|acts|omissions|allegedly|became|continue|his|counsel|councel|present|before|court|supreme|colombo|respondent|respondents|petitioner|petitioners|appellant|plaintiff|defendant|nature|exercise|mawatha|jayanthipura|battaramulla|article)\b"
     
     if re.search(grammar_nuke, clean):
         return None
         
-    # 5. Length check: Names are rarely longer than 5 words
+    # 6. Length check: Names are rarely longer than 6 words
     if 3 < len(clean) < 40:
-        if len(clean.split()) <= 5:
+        if len(clean.split()) <= 6:
             return clean.title()
     return None
 
@@ -76,9 +82,9 @@ def extract_bench_and_author(text):
                 name = clean_judge_name(part)
                 if name: bench.append(name)
         
-        # Look ABOVE (Added \bJ\b to catch "Amerasinghe, J,")
+        # Look ABOVE
         for j in range(max(0, trigger_idx - 6), trigger_idx):
-            if re.search(r"(?i)(\bJ\b|\bJ\.|Justice|\bCJ\b|\bC\.J\.|Chief Justice)", lines[j]):
+            if re.search(r"(?i)(\bJ\b|\bJ\.|\bCJ\b|\bC\.J\.|Chief Justice|Justice)", lines[j]):
                 for part in re.split(r"(?i)\band\b|,", lines[j]):
                     name = clean_judge_name(part)
                     if name: bench.append(name)
@@ -103,23 +109,59 @@ def extract_bench_and_author(text):
                     name = clean_judge_name(part)
                     if name: bench.append(name)
 
+    bench = list(dict.fromkeys(bench))
+
     # --- 2. EXTRACT AUTHOR JUDGE ---
+    
+    # STRATEGY A: THE "SUBTRACTION" METHOD (Fixes PDF 1 & 2)
+    agreeing_names = []
+    for i, line in enumerate(lines[-100:]):
+        if re.search(r"(?i)i\s+agree", line):
+            # Look at the 4 lines above "I agree" for the name (Fixes "Imam" in PDF 2)
+            for j in range(max(0, i-4), i):
+                name = clean_judge_name(lines[-100:][j])
+                if name: agreeing_names.append(name)
+            # Check the line itself
+            name = clean_judge_name(re.sub(r"(?i)i\s+agree.*", "", line))
+            if name: agreeing_names.append(name)
+            
+    if agreeing_names and bench:
+        for b_judge in bench:
+            is_agreeing = False
+            for a_judge in agreeing_names:
+                if b_judge.split()[-1] in a_judge or a_judge.split()[-1] in b_judge:
+                    is_agreeing = True
+                    break
+            if not is_agreeing:
+                author_judge.append(b_judge)
+                
+        if author_judge:
+            author_judge = list(dict.fromkeys(author_judge))
+            return bench, author_judge
+
+    # STRATEGY B: Explicit "Delivered by" declaration
     author_match = re.search(r"(?i)(?:judgment|order)\s+(?:of|delivered by|by)[\s:]+([A-Za-z\s\.]+?)(?=\n|,)", text)
     if author_match:
         name = clean_judge_name(author_match.group(1))
         if name: author_judge.append(name)
 
-    # Signature blocks at the absolute bottom (Expanded to catch PDF 1 Author)
+    # STRATEGY C: Collective Signatures at the bottom (For PDF 3 & 4)
     if not author_judge:
         bottom_lines = lines[-60:] 
         for i in range(len(bottom_lines) - 1):
             if re.search(r"(?i)(chief justice|judge of the supreme court|judge of the court of appeal|\bJ\b|\bJ\.|\bCJ\b|\bC\.J\.)", bottom_lines[i+1]):
                 name = clean_judge_name(bottom_lines[i])
                 if name: author_judge.append(name)
+                
+    # STRATEGY D: Mid-Document Authors (Fixes PDF 1)
+    if not author_judge:
+        for i, line in enumerate(lines[:100]):
+            if re.match(r"(?i)^[a-z]+\s+\d{1,2},\s+\d{4}", line): 
+                if i + 1 < len(lines):
+                    name = clean_judge_name(lines[i+1])
+                    if name: author_judge.append(name)
 
-    bench = list(dict.fromkeys(bench))
     author_judge = list(dict.fromkeys(author_judge))
-
     return bench, author_judge
 
 def process_pdfs(data_dir, output_dir):
