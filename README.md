@@ -1,100 +1,82 @@
-# Intern Assessment – Judge Extraction Task
+## Approach
 
-## Overview
+This solution strictly adheres to the assessment constraint of not using Generative AI or LLMs. Instead, it utilizes a deterministic, rule-based data extraction pipeline built in Python to handle the highly inconsistent formatting of Sri Lankan court decisions.
 
-You are required to build a **deterministic extraction system** to identify:
-
-1. **bench** – All judges listed as part of the bench (coram/present/before).
-2. **author_judge** – Judge(s) who authored/delivered the final judgment (may be one or more).
-
-You must extract this information from the court decisions provided.
+The extraction process is divided into four main stages:
 
 ---
 
-## Input
+### 1. Robust Text Extraction & OCR Fallback
 
-- All input court decisions are **PDF files** placed inside the `data/` folder.
-- There are exactly **4 court decisions**, named `sample-judgment-1.pdf` through `sample-judgment-4.pdf`.
-- Your program only needs to handle PDF files.
+The script initially attempts to extract the text layer from the PDF using **PyMuPDF (fitz)**. However, court documents are frequently scanned images rather than digital text.
 
-Your program must automatically process all `.pdf` files inside the `data/` folder.
+To handle this, the system:
+- Checks the extracted text length
+- Searches for basic legal keywords
 
----
-
-## Required Output
-
-Your program must generate structured output in JSON format.
-
-For each input file, produce:
-
-{
-  "source_file": "sample-judgment-1.pdf",
-  "bench": ["Judge Name 1", "Judge Name 2"],
-  "author_judge": ["Judge Name 1"]
-}
-
-Your program must write one JSON file per input file into the `output/` folder, matching the input filename:
-
-- `data/sample-judgment-1.pdf` → `output/sample-judgment-1.json`
-- `data/sample-judgment-2.pdf` → `output/sample-judgment-2.json`
-- etc.
-
-The output must be reproducible by running your script.
+If the text is too short or missing key terms, the script automatically triggers an **OCR fallback** using **pdf2image** and **pytesseract** to extract text from images.
 
 ---
 
-## Rules (Very Important)
+### 2. Bench Extraction (Keyword & Title Hunting)
 
-1. ❌ No LLMs or Generative AI models.
-   - No OpenAI, Anthropic, OpenRouter, Gemini, etc.
-   - No AI-based extraction tools.
-2. ❌ No manual editing of results.
-3. ✅ You may use any non-LLM approach, including but not limited to:
-   - Regex and rule-based parsing
-   - NLP libraries (e.g. spaCy, NLTK, stanza)
-   - Any other method that does not involve prompting a generative model
-4. ✅ All work must be included in a Git repository.
-5. ✅ The project must include clear execution instructions in `README.md`.
-6. ✅ Your `README.md` must include an **## Approach** section describing your extraction approach in plain English.
+To identify the panel of judges (the *bench*), the script scans the first 150 lines of the document for standard trigger words such as:
 
----
+- `BEFORE`
+- `PRESENT`
+- `CORAM`
 
-## What We Are Evaluating
+Once detected, it extracts names:
+- On the same line
+- Immediately before or after the trigger line
 
-We will evaluate:
+**Fallback Strategy (Title Hunting):**  
+If trigger words are missing, the system scans for judicial titles such as:
+- `J.`
+- `CJ`
+- `Chief Justice`
 
-- Correctness of `bench` extraction
-- Correctness of `author_judge` extraction
-- Robust handling of formatting variations
-- Code structure and clarity
-- Reproducibility of results
+This ensures robustness across differently formatted documents.
 
 ---
 
-## Environment & Execution
+### 3. Author Judge Extraction (Deductive Parsing)
 
-- Use **uv** for dependency management. You may assume `uv` is already installed on the testing environment.
-- Python version must be **3.11 or higher**.
-- You may add any dependencies you need, but they must be declared in `pyproject.toml` so that `uv sync` installs them.
-- Your `README.md` must include **complete instructions** to clone, set up, and run your project. We will evaluate your submission by following these instructions exactly.
+Since authoring formats vary across judgments, the system uses multiple prioritized strategies:
+
+- **Subtraction Method:**  
+  Detects `"I agree"` signatures at the bottom of the document. These judges are removed from the bench list, and the remaining judge is identified as the author.
+
+- **Explicit Declarations:**  
+  Searches for phrases like:
+  - `"Judgment delivered by..."`
+  - `"Order by..."`
+
+- **Bottom Signature Blocks:**  
+  Extracts all judges listed at the end when judgments are jointly authored.
+
+- **Mid-Document Signatures:**  
+  Captures cases where the author signs immediately after a date near the beginning of their judgment.
 
 ---
 
-## Submission Instructions
+### 4. Data Sanitization ("Grammar Nuke")
 
-Send an email with the subject line: "Application for Engineering Internship - {Your First Name} {Your Last Name}"
-to admin@paralegal.lk.
+To prevent incorrect extraction of non-name text, all candidates go through a strict cleaning pipeline:
 
-Your email should include:
+- Rejects case citations (e.g., strings containing `" v. "`)
+- Removes titles and prefixes:
+  - `Chief Justice`, `J.`, `PC`, `Dr.`
+- Removes signature artifacts:
+  - `Sgd.`, `I agree`
 
-- A link to your GitHub repository with the answer.
-    - Note: your answer repository **must** be named `paralegal-lk-internship-assignment` and **must** be public
-- Your CV as an attachment
-- Alongside a cover letter explaining why you are interested in the role 
----
+**Grammar Nuke Filter:**
+- Eliminates common English words (`the`, `in`, `of`, etc.)
+- Filters Sri Lankan address terms (`Colombo`, `Mawatha`)
+- Removes legal jargon (`Respondent`, `Counsel`, `Appellant`)
 
-## Notes
+Finally, constraints such as:
+- Word count limits
+- Character filtering
 
-- Your solution must run without manual intervention.
-- Code quality and clarity matter.
-- Make reasonable assumptions, but document them in your README.
+ensure that only valid human names are included in the final JSON output.
