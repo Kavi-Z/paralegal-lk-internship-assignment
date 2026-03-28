@@ -1,97 +1,139 @@
-## Approach
+# ⚖️ Sri Lankan Court Judgment — Judge Extraction Pipeline
 
-This solution strictly adheres to the assessment constraint of not using Generative AI or LLMs. Instead, it utilizes a deterministic, rule-based data extraction pipeline built in Python to handle the highly inconsistent formatting of Sri Lankan court decisions.
-
-The extraction process is divided into four main stages:
+> A deterministic, rule-based data extraction pipeline for parsing judge information from Sri Lankan court decisions — **no LLMs or Generative AI used**.
 
 ---
 
-### 1. Robust Text Extraction & OCR Fallback
+## 🧭 Overview
 
-The script initially attempts to extract the text layer from the PDF using **PyMuPDF (fitz)**. However, court documents are frequently scanned images rather than digital text.
-
-To handle this, the system:
-- Checks the extracted text length
-- Searches for basic legal keywords
-
-If the text is too short or missing key terms, the script automatically triggers an **OCR fallback** using **pdf2image** and **pytesseract** to extract text from images.
+Sri Lankan court PDFs are notoriously inconsistent in formatting. This pipeline handles that chaos with a robust, four-stage extraction process — fully deterministic, fully auditable.
 
 ---
 
-### 2. Bench Extraction (Keyword & Title Hunting)
+## 🔬 How It Works
 
-To identify the panel of judges (the *bench*), the script scans the first 150 lines of the document for standard trigger words such as:
+### Stage 1 — Robust Text Extraction & OCR Fallback
 
-- `BEFORE`
-- `PRESENT`
-- `CORAM`
+The script first attempts to extract the embedded text layer from the PDF using **PyMuPDF (`fitz`)**.
 
-Once detected, it extracts names:
-- On the same line
-- Immediately before or after the trigger line
+Court documents are frequently scanned images rather than digital text, so the system automatically evaluates extraction quality by:
 
-**Fallback Strategy (Title Hunting):**  
-If trigger words are missing, the system scans for judicial titles such as:
-- `J.`
-- `CJ`
-- `Chief Justice`
+- Checking extracted text length
+- Searching for basic legal keywords
 
-This ensures robustness across differently formatted documents.
+If the text is too short or missing key terms, an **OCR fallback** is triggered using **`pdf2image`** and **`pytesseract`** to extract text directly from the scanned images.
 
 ---
 
-### 3. Author Judge Extraction (Deductive Parsing)
+### Stage 2 — Bench Extraction (Keyword & Title Hunting)
 
-Since authoring formats vary across judgments, the system uses multiple prioritized strategies:
+To identify the panel of judges (*the bench*), the script scans the **first 150 lines** of the document for standard trigger words:
 
-- **Subtraction Method:**  
-  Detects `"I agree"` signatures at the bottom of the document. These judges are removed from the bench list, and the remaining judge is identified as the author.
+| Trigger Word | Example Usage |
+|---|---|
+| `BEFORE` | `BEFORE: Hon. Justice Silva` |
+| `PRESENT` | `PRESENT: Wigneswaran J.` |
+| `CORAM` | `CORAM: Fernando CJ, Weerasuriya J.` |
 
-- **Explicit Declarations:**  
-  Searches for phrases like:
-  - `"Judgment delivered by..."`
-  - `"Order by..."`
+Once detected, names are extracted from the same line, as well as immediately before or after the trigger line.
 
-- **Bottom Signature Blocks:**  
-  Extracts all judges listed at the end when judgments are jointly authored.
+**Fallback — Title Hunting:**
+If trigger words are absent, the system falls back to scanning for judicial title patterns:
 
-- **Mid-Document Signatures:**  
-  Captures cases where the author signs immediately after a date near the beginning of their judgment.
+```
+J.  |  CJ  |  Chief Justice  |  P.C.
+```
 
 ---
 
-### 4. Data Sanitization ("Grammar Nuke")
+### Stage 3 — Author Judge Extraction (Deductive Parsing)
 
-To prevent incorrect extraction of non-name text, all candidates go through a strict cleaning pipeline:
+Authoring formats vary significantly across judgments. The system uses **four prioritized strategies**:
 
-- Rejects case citations (e.g., strings containing `" v. "`)
-- Removes titles and prefixes:
-  - `Chief Justice`, `J.`, `PC`, `Dr.`
-- Removes signature artifacts:
-  - `Sgd.`, `I agree`
+```
+┌─────────────────────────────────────────────────────────────┐
+│  1. Subtraction Method                                       │
+│     Detects "I agree" signatures → removes those judges      │
+│     from the bench → remaining judge = author               │
+├─────────────────────────────────────────────────────────────┤
+│  2. Explicit Declarations                                    │
+│     "Judgment delivered by..."  /  "Order by..."            │
+├─────────────────────────────────────────────────────────────┤
+│  3. Bottom Signature Blocks                                  │
+│     Judges listed at the end → joint authorship             │
+├─────────────────────────────────────────────────────────────┤
+│  4. Mid-Document Signatures                                  │
+│     Author signs immediately after a date near the start    │
+│     of their judgment section                               │
+└─────────────────────────────────────────────────────────────┘
+```
 
-**Grammar Nuke Filter:**
-- Eliminates common English words (`the`, `in`, `of`, etc.)
-- Filters Sri Lankan address terms (`Colombo`, `Mawatha`)
-- Removes legal jargon (`Respondent`, `Counsel`, `Appellant`)
+---
 
-Finally, constraints such as:
-- Word count limits
-- Character filtering
+### Stage 4 — Data Sanitization ("Grammar Nuke")
 
-ensure that only valid human names are included in the final JSON output.
+All name candidates are passed through a strict cleaning pipeline before being included in the final output.
 
-**Installation:**
-- Clone the repository:
-  
-- git clone https://github.com/your-username/judge-extraction.git
-- cd judge-extraction
-- uv install
-- uv run src/extract_judges.py
+**Filters applied:**
 
-**Dependencies:**
-Python 3.10+
-PyMuPDF (fitz)
-pdf2image
-pytesseract
-uv package manager
+- ❌ Rejects case citations (e.g. strings containing `" v. "`)
+- ❌ Strips titles and prefixes: `Chief Justice`, `J.`, `PC`, `Dr.`
+- ❌ Removes signature artifacts: `Sgd.`, `I agree`
+- ❌ Eliminates common English stopwords: `the`, `in`, `of`, …
+- ❌ Filters Sri Lankan address terms: `Colombo`, `Mawatha`, …
+- ❌ Removes legal jargon: `Respondent`, `Counsel`, `Appellant`, …
+
+**Final constraints** (word count limits, character filtering) ensure only valid human names reach the JSON output.
+
+---
+
+## 🚀 Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/your-username/judge-extraction.git
+cd judge-extraction
+
+# Install dependencies and run
+uv install
+uv run src/extract_judges.py
+```
+
+---
+
+## 📦 Dependencies
+
+| Package | Purpose |
+|---|---|
+| `PyMuPDF (fitz)` | Primary PDF text extraction |
+| `pdf2image` | Converts PDF pages to images for OCR |
+| `pytesseract` | OCR engine for scanned documents |
+| `uv` | Package manager & runner |
+
+**Requires:** Python 3.10+
+
+---
+
+## 📄 Output
+
+The pipeline produces a structured **JSON output** with the extracted bench and author judge(s) for each document.
+
+```json
+{
+  "bench": ["Silva J.", "Fernando CJ", "Weerasuriya J."],
+  "author": "Fernando CJ"
+}
+```
+
+---
+
+## ⚙️ Design Principles
+
+- ✅ **No LLMs or Generative AI** — fully deterministic and rule-based
+- ✅ **Auditable** — every decision in the pipeline is traceable
+- ✅ **Resilient** — multiple fallback strategies at every stage
+- ✅ **Precise** — aggressive sanitization to prevent false positives
+
+---
+
+*Built for the Sri Lankan legal data ecosystem.*
